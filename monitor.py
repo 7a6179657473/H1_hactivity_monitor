@@ -2,11 +2,17 @@ import requests
 import json
 import os
 import time
+import sys
 
 # Configuration
 H1_GRAPHQL_URL = "https://hackerone.com/graphql"
-# The Discord Webhook URL should be placed here or set via environment variable
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "YOUR_WEBHOOK_HERE")
+# The Discord Webhook URL should be set via the `DISCORD_WEBHOOK_URL` environment variable
+# or replaced here with a literal webhook URL. Using the webhook URL as the env var name
+# was a bug; use a proper variable name instead.
+# Default webhook (will be used if `DISCORD_WEBHOOK_URL` env var is not set).
+DEFAULT_DISCORD_WEBHOOK = ("YOURWEBHOOKHERE")
+# Read from environment, but fall back to the provided webhook.
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", DEFAULT_DISCORD_WEBHOOK)
 STATE_FILE = "last_disclosed_id.txt"
 
 HEADERS = {
@@ -46,7 +52,11 @@ def fetch_hacktivity():
         response = requests.post(H1_GRAPHQL_URL, json=payload, headers=HEADERS, timeout=10)
         print(f"[*] Response Status: {response.status_code}")
         response.raise_for_status()
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError:
+            print("[!] Invalid JSON received from HackerOne")
+            return None
         
         if 'errors' in data:
             print(f"[!] GraphQL Errors: {json.dumps(data['errors'], indent=2)}")
@@ -71,17 +81,25 @@ def send_to_discord(report):
         return
 
     report_id = report.get("_id")
-    title = report.get("title")
-    # API URL might already be absolute
-    raw_url = report.get("url")
-    url = raw_url if raw_url.startswith("http") else f"https://hackerone.com{raw_url}"
-    
-    team = report.get("team", {}).get("handle")
-    
-    severity_obj = report.get("severity")
+    title = report.get("title") or "No title"
+    # API URL might already be absolute; guard for missing values
+    raw_url = report.get("url") or ""
+    if raw_url.startswith("http"):
+        url = raw_url
+    elif raw_url:
+        url = f"https://hackerone.com{raw_url}"
+    else:
+        url = "https://hackerone.com/"
+
+    team = (report.get("team") or {}).get("handle") or "Unknown"
+
+    severity_obj = report.get("severity") or {}
     severity = "N/A"
-    if severity_obj and severity_obj.get("rating"):
-        severity = severity_obj.get("rating").capitalize()
+    rating = severity_obj.get("rating")
+    if rating:
+        severity = str(rating).capitalize()
+
+    report_id_str = f"#{report_id}" if report_id is not None else "N/A"
 
     embed = {
         "title": f"New Disclosure: {title}",
@@ -90,7 +108,7 @@ def send_to_discord(report):
         "fields": [
             {"name": "Program", "value": team, "inline": True},
             {"name": "Severity", "value": severity, "inline": True},
-            {"name": "Report ID", "value": f"#{report_id}", "inline": True}
+            {"name": "Report ID", "value": report_id_str, "inline": True}
         ],
         "footer": {"text": "HackerOne Monitor"}
     }
@@ -169,6 +187,14 @@ def run_monitor(run_once=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="HackerOne Hacktivity Monitor")
     parser.add_argument("--once", action="store_true", help="Run once and exit (for cron usage)")
+    parser.add_argument("--webhook", help="Discord webhook URL to use for this run (overrides env)")
     args = parser.parse_args()
-    
+    # Allow CLI override of the webhook for one-off runs
+    if args.webhook:
+        DISCORD_WEBHOOK_URL = args.webhook
+
     run_monitor(run_once=args.once)
+
+    # Ensure explicit exit when requested
+    if args.once:
+        sys.exit(0)
