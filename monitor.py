@@ -2,6 +2,7 @@ import requests
 import json
 import os
 import time
+import signal
 import sys
 
 # Configuration
@@ -10,7 +11,9 @@ H1_GRAPHQL_URL = "https://hackerone.com/graphql"
 # or replaced here with a literal webhook URL. Using the webhook URL as the env var name
 # was a bug; use a proper variable name instead.
 # Default webhook (will be used if `DISCORD_WEBHOOK_URL` env var is not set).
-DEFAULT_DISCORD_WEBHOOK = ("YOURWEBHOOKHERE")
+DEFAULT_DISCORD_WEBHOOK = (
+    "WEBHOOKHERE"
+)
 # Read from environment, but fall back to the provided webhook.
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", DEFAULT_DISCORD_WEBHOOK)
 STATE_FILE = "last_disclosed_id.txt"
@@ -152,7 +155,16 @@ import argparse
 
 # ... existing code ...
 
-def run_monitor(run_once=False):
+shutdown_requested = False
+
+def _signal_handler(sig, frame):
+    global shutdown_requested
+    print(f"[*] Signal received ({sig}). Shutting down...")
+    sys.stdout.flush()
+    shutdown_requested = True
+
+
+def run_monitor(run_once=False, interval=1800, force=False):
     """
     The main execution loop. It fetches the latest reports, compares 
     the newest one to the last seen ID, and triggers a Discord ping 
@@ -169,7 +181,7 @@ def run_monitor(run_once=False):
                 latest_id = str(latest_report.get("_id"))
                 last_seen_id = get_last_id()
 
-                if latest_id != last_seen_id:
+                if force or latest_id != last_seen_id:
                     print(f"[*] New report detected: {latest_id}")
                     send_to_discord(latest_report)
                     save_last_id(latest_id)
@@ -178,23 +190,49 @@ def run_monitor(run_once=False):
             else:
                 print("[!] No reports found in results.")
 
-        if run_once:
+        if run_once or shutdown_requested:
             break
 
-        # Sleep for 10 minutes before checking again
-        time.sleep(600)
+        # Sleep in short increments so we can exit quickly on SIGINT/SIGTERM.
+        print(f"[*] Sleeping for {interval} seconds (interrupt to stop)...")
+        sys.stdout.flush()
+        slept = 0
+        try:
+            while slept < interval:
+                if shutdown_requested:
+                    break
+                time.sleep(1)
+                slept += 1
+        except KeyboardInterrupt:
+            # Allow Ctrl+C to request shutdown and exit the loop promptly
+            shutdown_requested = True
+            break
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="HackerOne Hacktivity Monitor")
     parser.add_argument("--once", action="store_true", help="Run once and exit (for cron usage)")
     parser.add_argument("--webhook", help="Discord webhook URL to use for this run (overrides env)")
+    parser.add_argument("--force", action="store_true", help="Send the latest report even if it matches the saved last ID")
+    parser.add_argument("--interval", type=int, default=1800, help="Polling interval in seconds (default: 1800)")
     args = parser.parse_args()
+
     # Allow CLI override of the webhook for one-off runs
     if args.webhook:
         DISCORD_WEBHOOK_URL = args.webhook
 
-    run_monitor(run_once=args.once)
+    # Register signal handlers for graceful shutdown
+    try:
+        signal.signal(signal.SIGINT, _signal_handler)
+        signal.signal(signal.SIGTERM, _signal_handler)
+    except Exception:
+        # Some platforms may not support SIGTERM
+        pass
 
-    # Ensure explicit exit when requested
+    run_monitor(run_once=args.once, interval=args.interval, force=args.force)
+
+    # Ensure explicit exit when requested. Use os._exit to avoid lingering
+    # non-daemon threads keeping the process alive after a single-run.
     if args.once:
-        sys.exit(0)
+        print("[*] Exiting after one run.")
+        sys.stdout.flush()
+        os._exit(0)
