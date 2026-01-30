@@ -170,6 +170,7 @@ def run_monitor(run_once=False, interval=1800, force=False):
     the newest one to the last seen ID, and triggers a Discord ping 
     for any new items found.
     """
+    global shutdown_requested
     print("[*] Starting HackerOne Hacktivity Monitor...")
     while True:
         nodes = fetch_hacktivity()
