@@ -46,30 +46,6 @@ python monitor.py
 python monitor.py --once
 ```
 
-## Cron setup (run every 30 minutes)
-
-The following assumes you have Python available on the machine where the cron job will run and that the repository is checked out to `/path/to/H1_hactivity_monitor`.
-
-1. Open the crontab editor:
-
-```bash
-crontab -e
-```
-
-2. Add the following line to run the script every 30 minutes. Adjust the `PYTHON` and `WORKDIR` paths as needed.
-
-```cron
-*/30 * * * * cd /path/to/H1_hactivity_monitor && /usr/bin/python3 monitor.py --once >> monitor.log 2>&1
-```
-
-Notes:
-- `*/30 * * * *` runs the job every 30 minutes.
-- `--once` makes the script run a single check and exit so cron controls scheduling.
-- `monitor.log` will capture stdout/stderr; rotate logs as needed (e.g., via `logrotate`).
-
-If you need to run this on a Windows machine, use Task Scheduler to create a scheduled task that executes the equivalent PowerShell or Python command every 30 minutes.
-
-
 ## Files
 
 - `monitor.py`: Main script.
