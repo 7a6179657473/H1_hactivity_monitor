@@ -24,13 +24,14 @@ A Python script that monitors HackerOne's Hacktivity feed for newly disclosed vu
 
 ## Configuration
 
-You must set the `DISCORD_WEBHOOK_URL` environment variable to your Discord Webhook URL.
+You must modify the `monitor.py` file and replace `"YOUR_WEBHOOK_HERE"` with your Discord Webhook URL.
 
-```bash
-export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+```python
+# monitor.py
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/..."
 ```
 
-Alternatively, you can modify the `monitor.py` file (not recommended) but be sure not to commit your webhook URL.
+**WARNING:** Be sure not to commit your webhook URL if you are publishing your code.
 
 ## Usage
 

@@ -6,7 +6,7 @@ import time
 # Configuration
 H1_GRAPHQL_URL = "https://hackerone.com/graphql"
 # The Discord Webhook URL should be placed here or set via environment variable
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "YOUR_WEBHOOK_HERE")
+DISCORD_WEBHOOK_URL = "YOUR_WEBHOOK_HERE"
 
 # Ensure state file is stored relative to the script location
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
