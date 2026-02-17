@@ -1,23 +1,41 @@
+# monitor.py
+# A Python script to monitor HackerOne's Hacktivity feed for new disclosures
+# and send notifications to a Discord channel.
+
 import requests
 import json
 import os
 import time
+import argparse
 
-# Configuration
+# --- CONFIGURATION ---
+# These are the settings you might need to change.
+
+# The endpoint for HackerOne's public GraphQL API.
 H1_GRAPHQL_URL = "https://hackerone.com/graphql"
-# The Discord Webhook URL should be placed here or set via environment variable
-DISCORD_WEBHOOK_URL = "YOUR_WEBHOOK_HERE"
 
-# Ensure state file is stored relative to the script location
+# Your Discord Webhook URL. This is how the script sends messages to your channel.
+# It's best practice to set this as an environment variable, but you can hardcode it here for testing.
+# IMPORTANT: If you hardcode it, DO NOT commit this file to a public GitHub repo.
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "YOUR_WEBHOOK_HERE")
+
+# --- SCRIPT CONSTANTS ---
+# These are internal settings that usually don't need to be changed.
+
+# Get the directory where the script is located to ensure the state file is always in the same place.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# The name of the file used to store the ID of the last report we've seen.
 STATE_FILE = os.path.join(BASE_DIR, "last_disclosed_id.txt")
 
+# Standard headers to make our script look like a regular web browser when it talks to HackerOne's API.
 HEADERS = {
     "Content-Type": "application/json",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
     "X-Requested-With": "XMLHttpRequest"
 }
 
+# This is the GraphQL query. It's like a specific API request that asks HackerOne for exactly the data we need:
+# the 10 most recent, publicly disclosed reports, ordered by when they were disclosed.
 QUERY = """
 query {
   reports(
@@ -40,57 +58,77 @@ query {
 }
 """
 
+# --- FUNCTIONS ---
+
 def fetch_hacktivity():
     """
-    Sends a GraphQL query to HackerOne to retrieve the most recently
-    disclosed vulnerability reports using the reports field.
+    Fetches the latest disclosed reports from HackerOne's GraphQL API.
+    
+    This function sends the QUERY to HackerOne and processes the response.
+    It handles potential network errors and API errors.
+    
+    Returns:
+        A list of report objects (as dictionaries), or None if an error occurs.
     """
+    print("[*] Fetching latest disclosures from HackerOne...")
     payload = {"query": QUERY}
     try:
+        # Send the request to the API.
         response = requests.post(H1_GRAPHQL_URL, json=payload, headers=HEADERS, timeout=10)
-        # print(f"[*] Response Status: {response.status_code}") # Reduced verbosity
+        # If the response was an error (like 404 or 500), this will raise an exception.
         response.raise_for_status()
         data = response.json()
         
+        # Check if the API itself reported any errors in the data.
         if 'errors' in data:
             print(f"[!] GraphQL Errors: {json.dumps(data['errors'], indent=2)}")
             return None
             
+        # Extract the list of reports from the nested JSON response.
         nodes = data.get("data", {}).get("reports", {}).get("nodes", [])
         return nodes
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
+        # Handle network-related errors.
         print(f"[!] Error fetching Hacktivity: {e}")
         return None
 
 def send_to_discord(report):
     """
-    Formats report data and sends it as an embed to the configured
-    Discord webhook.
+    Formats a report into a nice-looking Discord embed and sends it via webhook.
+    
+    Args:
+        report (dict): A dictionary containing the details of a single vulnerability report.
     """
+    # Don't do anything if the webhook URL hasn't been set.
     if DISCORD_WEBHOOK_URL == "YOUR_WEBHOOK_HERE":
-        print("[!] Discord Webhook URL not set. Skipping ping.")
+        print("[!] Discord Webhook URL not set. Skipping notification.")
         return
 
     if not report:
         return
 
+    # --- Data Extraction ---
+    # Pull out the specific details we want from the report object.
     report_id = report.get("_id")
     title = report.get("title")
-    # API URL might already be absolute
+    # Make sure the URL is a full, valid URL.
     raw_url = report.get("url")
     url = raw_url if raw_url.startswith("http") else f"https://hackerone.com{raw_url}"
+    team = report.get("team", {}).get("handle", "N/A")
     
-    team = report.get("team", {}).get("handle")
-    
+    # Safely get the severity rating.
     severity_obj = report.get("severity")
     severity = "N/A"
     if severity_obj and severity_obj.get("rating"):
         severity = severity_obj.get("rating").capitalize()
 
+    # --- Embed Creation ---
+    # This dictionary defines the structure and content of the Discord message.
+    # It creates a rich "embed" with a title, link, color, and fields.
     embed = {
         "title": f"New Disclosure: {title}",
         "url": url,
-        "color": 3447003,
+        "color": 3447003,  # A nice blue color
         "fields": [
             {"name": "Program", "value": team, "inline": True},
             {"name": "Severity", "value": severity, "inline": True},
@@ -101,22 +139,24 @@ def send_to_discord(report):
 
     payload = {"embeds": [embed]}
     try:
-        # print(f"[*] Sending payload to Discord: {json.dumps(payload, indent=2)}") # Reduced verbosity
+        # Send the formatted payload to the Discord webhook URL.
         res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-        res.raise_for_status()
+        res.raise_for_status() # Check for errors from Discord's side.
         print(f"[+] Successfully sent report #{report_id} to Discord.")
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
         print(f"[!] Error sending to Discord: {e}")
+        # If Discord gave us an error message, print it.
         if 'res' in locals() and res.text:
             print(f"[*] Discord Response: {res.text}")
 
 def get_last_id():
     """
-    Reads the last processed report ID from a local text file to 
-    prevent duplicate notifications.
+    Reads the last processed report ID from our state file.
+    
+    This prevents us from sending duplicate notifications every time the script runs.
     
     Returns:
-        str: The last seen report ID, or None if the file doesn't exist.
+        The last seen report ID as a string, or None if the file doesn't exist.
     """
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r") as f:
@@ -126,27 +166,27 @@ def get_last_id():
 
 def save_last_id(report_id):
     """
-    Saves the ID of the most recently processed report to a local 
-    text file.
+    Saves the ID of the most recent report we've processed to the state file.
     
     Args:
-        report_id (str): The ID to save.
+        report_id (str): The ID of the report to save.
     """
     try:
         with open(STATE_FILE, "w") as f:
             f.write(str(report_id))
-    except Exception as e:
-        print(f"[!] Error saving state: {e}")
-
-import argparse
-
-# ... existing code ...
+    except IOError as e:
+        print(f"[!] Error saving state to {STATE_FILE}: {e}")
 
 def run_monitor(run_once=False):
     """
-    The main execution loop. It fetches the latest reports, compares 
-    the newest one to the last seen ID, and triggers a Discord ping 
-    for any new items found.
+    The main execution loop for the monitor.
+    
+    It fetches reports, checks for new ones against the last seen ID,
+    sends notifications for new reports, and then updates the last seen ID.
+    
+    Args:
+        run_once (bool): If True, the loop runs only once and then exits.
+                         If False, it runs forever, pausing between checks.
     """
     print("[*] Starting HackerOne Hacktivity Monitor...")
     while True:
@@ -155,40 +195,57 @@ def run_monitor(run_once=False):
             last_seen_id = get_last_id()
             new_reports = []
 
-            # If no state exists, initialize with the latest report to avoid spamming 
-            # (or process all? Standard behavior for monitors is usually 'start from now')
+            # On the very first run, the state file won't exist.
+            # We'll initialize it with the ID of the newest report to avoid
+            # spamming the channel with the 10 reports we just fetched.
             if last_seen_id is None:
                 print(f"[*] First run detected. Initializing with latest report ID: {nodes[0]['_id']}")
                 save_last_id(nodes[0]['_id'])
             else:
-                # Iterate through fetched reports to find new ones
+                # We have a history, so let's find what's new.
+                # Go through the fetched reports one by one.
                 for node in nodes:
+                    # If we find the report we saw last time, stop. Everything after it is old news.
                     if str(node['_id']) == last_seen_id:
-                        break # We reached the last seen report
+                        break
+                    # If it's not the one we last saw, it must be new. Add it to our list.
                     new_reports.append(node)
                 
                 if new_reports:
                     print(f"[*] Found {len(new_reports)} new reports.")
-                    # Process oldest to newest
+                    # We process the reports in reverse order (oldest to newest)
+                    # so the notifications appear in chronological order in Discord.
                     for report in reversed(new_reports):
                         send_to_discord(report)
                     
-                    # Update state to the newest report we just processed
+                    # After sending all notifications, update the state file to the ID
+                    # of the absolute newest report we just handled.
                     save_last_id(new_reports[0]['_id'])
                 else:
-                    print(f"[*] No new disclosures. (Last ID: {last_seen_id})")
+                    print(f"[*] No new disclosures. (Last known ID: {last_seen_id})")
         else:
-            print("[!] No reports found in results or API error.")
+            print("[!] No reports found or an API error occurred.")
 
+        # If the --once flag was used, break the loop and exit the script.
         if run_once:
+            print("[*] Run complete.")
             break
 
-        # Sleep for 10 minutes before checking again
+        # If not running once, wait for 10 minutes before checking again.
+        print("[*] Waiting for 10 minutes before the next check...")
         time.sleep(600)
 
+# --- SCRIPT EXECUTION ---
+
+# This is the standard entry point for a Python script.
+# The code inside this block only runs when you execute the script directly
+# (e.g., `python monitor.py`), not when it's imported into another script.
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="HackerOne Hacktivity Monitor")
-    parser.add_argument("--once", action="store_true", help="Run once and exit (for cron usage)")
+    # Set up the argument parser to handle command-line options.
+    parser = argparse.ArgumentParser(description="A script to monitor HackerOne's Hacktivity feed and notify on Discord.")
+    # Add an optional argument `--once` that, if present, runs the script just one time.
+    parser.add_argument("--once", action="store_true", help="Run the monitor a single time and then exit.")
     args = parser.parse_args()
     
+    # Call the main function, passing whether the --once flag was set.
     run_monitor(run_once=args.once)
