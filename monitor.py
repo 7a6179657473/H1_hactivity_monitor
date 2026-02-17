@@ -5,6 +5,7 @@
 import requests
 import json
 import os
+import sys
 import time
 import argparse
 
@@ -14,10 +15,8 @@ import argparse
 # The endpoint for HackerOne's public GraphQL API.
 H1_GRAPHQL_URL = "https://hackerone.com/graphql"
 
-# Your Discord Webhook URL. This is how the script sends messages to your channel.
-# It's best practice to set this as an environment variable, but you can hardcode it here for testing.
-# IMPORTANT: If you hardcode it, DO NOT commit this file to a public GitHub repo.
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "YOUR_WEBHOOK_HERE")
+# Your Discord Webhook URL is loaded from an environment variable for security.
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 # --- SCRIPT CONSTANTS ---
 # These are internal settings that usually don't need to be changed.
@@ -60,6 +59,21 @@ query {
 
 # --- FUNCTIONS ---
 
+def sanitize_input(text):
+    """
+    Strips characters that have special meaning in Discord markdown.
+    
+    Args:
+        text (str): The input string to sanitize.
+        
+    Returns:
+        str: The sanitized string.
+    """
+    if not isinstance(text, str):
+        return text
+    # Characters to escape: *, _, `, |, >, ~
+    return text.replace('*', '').replace('_', '').replace('`', '').replace('|', '').replace('>', '').replace('~', '')
+
 def fetch_hacktivity():
     """
     Fetches the latest disclosed reports from HackerOne's GraphQL API.
@@ -81,15 +95,15 @@ def fetch_hacktivity():
         
         # Check if the API itself reported any errors in the data.
         if 'errors' in data:
-            print(f"[!] GraphQL Errors: {json.dumps(data['errors'], indent=2)}")
+            print("[!] An error occurred while querying the GraphQL API.")
             return None
             
         # Extract the list of reports from the nested JSON response.
         nodes = data.get("data", {}).get("reports", {}).get("nodes", [])
         return nodes
-    except requests.exceptions.RequestException as e:
+    except requests.exceptions.RequestException:
         # Handle network-related errors.
-        print(f"[!] Error fetching Hacktivity: {e}")
+        print("[!] A network error occurred while fetching Hacktivity data.")
         return None
 
 def send_to_discord(report):
@@ -99,22 +113,18 @@ def send_to_discord(report):
     Args:
         report (dict): A dictionary containing the details of a single vulnerability report.
     """
-    # Don't do anything if the webhook URL hasn't been set.
-    if DISCORD_WEBHOOK_URL == "YOUR_WEBHOOK_HERE":
-        print("[!] Discord Webhook URL not set. Skipping notification.")
-        return
-
     if not report:
         return
 
-    # --- Data Extraction ---
-    # Pull out the specific details we want from the report object.
+    # --- Data Extraction & Sanitization ---
+    # Pull out the specific details we want from the report object and sanitize them.
     report_id = report.get("_id")
-    title = report.get("title")
+    title = sanitize_input(report.get("title", "No Title"))
+    team = sanitize_input(report.get("team", {}).get("handle", "N/A"))
+    
     # Make sure the URL is a full, valid URL.
     raw_url = report.get("url")
-    url = raw_url if raw_url.startswith("http") else f"https://hackerone.com{raw_url}"
-    team = report.get("team", {}).get("handle", "N/A")
+    url = raw_url if raw_url and raw_url.startswith("http") else f"https://hackerone.com{raw_url}"
     
     # Safely get the severity rating.
     severity_obj = report.get("severity")
@@ -143,11 +153,8 @@ def send_to_discord(report):
         res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
         res.raise_for_status() # Check for errors from Discord's side.
         print(f"[+] Successfully sent report #{report_id} to Discord.")
-    except requests.exceptions.RequestException as e:
-        print(f"[!] Error sending to Discord: {e}")
-        # If Discord gave us an error message, print it.
-        if 'res' in locals() and res.text:
-            print(f"[*] Discord Response: {res.text}")
+    except requests.exceptions.RequestException:
+        print(f"[!] A network error occurred while sending a notification to Discord for report #{report_id}.")
 
 def get_last_id():
     """
@@ -241,6 +248,13 @@ def run_monitor(run_once=False):
 # The code inside this block only runs when you execute the script directly
 # (e.g., `python monitor.py`), not when it's imported into another script.
 if __name__ == "__main__":
+    # Add a check to ensure the Discord Webhook URL is set.
+    if not DISCORD_WEBHOOK_URL:
+        print("[!] FATAL: The DISCORD_WEBHOOK_URL environment variable is not set.")
+        print("[!] Please set it to your Discord webhook URL.")
+        print("[!] Example: export DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...'")
+        sys.exit(1) # Exit with a non-zero status code to indicate an error.
+
     # Set up the argument parser to handle command-line options.
     parser = argparse.ArgumentParser(description="A script to monitor HackerOne's Hacktivity feed and notify on Discord.")
     # Add an optional argument `--once` that, if present, runs the script just one time.
