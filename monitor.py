@@ -16,7 +16,9 @@ import argparse
 H1_GRAPHQL_URL = "https://hackerone.com/graphql"
 
 # Your Discord Webhook URL is loaded from an environment variable for security.
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+# Replace "YOUR_DISCORD_WEBHOOK_URL_HERE" with your actual webhook URL,
+# or set the DISCORD_WEBHOOK_URL environment variable.
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "YOUR_DISCORD_WEBHOOK_URL_HERE")
 
 # --- SCRIPT CONSTANTS ---
 # These are internal settings that usually don't need to be changed.
@@ -238,9 +240,9 @@ def run_monitor(run_once=False):
             print("[*] Run complete.")
             break
 
-        # If not running once, wait for 10 minutes before checking again.
-        print("[*] Waiting for 10 minutes before the next check...")
-        time.sleep(600)
+        # If not running once, wait for 1 hour before checking again.
+        print("[*] Waiting for 1 hour before the next check...")
+        time.sleep(3600)
 
 # --- SCRIPT EXECUTION ---
 
@@ -248,9 +250,9 @@ def run_monitor(run_once=False):
 # The code inside this block only runs when you execute the script directly
 # (e.g., `python monitor.py`), not when it's imported into another script.
 if __name__ == "__main__":
-    # Add a check to ensure the Discord Webhook URL is set.
-    if not DISCORD_WEBHOOK_URL:
-        print("[!] FATAL: The DISCORD_WEBHOOK_URL environment variable is not set.")
+    # Add a check to ensure the Discord Webhook URL is set and not the placeholder.
+    if not DISCORD_WEBHOOK_URL or DISCORD_WEBHOOK_URL == "YOUR_DISCORD_WEBHOOK_URL_HERE":
+        print("[!] FATAL: The DISCORD_WEBHOOK_URL environment variable is not set or is still the default placeholder.")
         print("[!] Please set it to your Discord webhook URL.")
         print("[!] Example: export DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...'")
         sys.exit(1) # Exit with a non-zero status code to indicate an error.
