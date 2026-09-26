@@ -18,24 +18,34 @@ A Python script that monitors HackerOne's Hacktivity feed for newly disclosed vu
 
 1. Clone the repository.
 2. Install dependencies:
-   ```bash
    pip install -r requirements.txt
-   ```
 
 ## Configuration
 
-You must modify the `monitor.py` file and replace `"YOUR_WEBHOOK_HERE"` with your Discord Webhook URL.
+Set the `DISCORD_WEBHOOK_URL` environment variable to your Discord webhook URL.
 
-```python
-# monitor.py
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/..."
+**Linux / macOS:**
+```bash
+export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
 ```
 
-**WARNING:** Be sure not to commit your webhook URL if you are publishing your code.
+**Windows:**
+```powershell
+$env:DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+```
+
+You can also create a `.env` file in the same directory as the script and add the following line:
+
+```
+DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
+```
+
+The script will automatically load the environment variable from this file.
+
 
 ## Usage
 
-### Run continuously (Loop every 10 minutes)
+### Run continuously (Loop every 1 hour)
 
 ```bash
 python monitor.py
