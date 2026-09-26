@@ -16,9 +16,9 @@ import argparse
 H1_GRAPHQL_URL = "https://hackerone.com/graphql"
 
 # Your Discord Webhook URL is loaded from an environment variable for security.
-# Replace "YOUR_DISCORD_WEBHOOK_URL_HERE" with your actual webhook URL,
-# or set the DISCORD_WEBHOOK_URL environment variable.
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "YOUR_DISCORD_WEBHOOK_URL_HERE")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+# Optional: also mirror disclosures to a Slack channel (plain text, NO @mention -> slaude does not act).
+SLACK_CVE_WEBHOOK_URL = os.getenv("SLACK_CVE_WEBHOOK_URL")
 
 # --- SCRIPT CONSTANTS ---
 # These are internal settings that usually don't need to be changed.
@@ -158,6 +158,27 @@ def send_to_discord(report):
     except requests.exceptions.RequestException:
         print(f"[!] A network error occurred while sending a notification to Discord for report #{report_id}.")
 
+def send_to_slack(report):
+    """Mirror a disclosure to Slack via incoming webhook. Plain text, NO @mention
+    (so slaude does not auto-act). No-op if SLACK_CVE_WEBHOOK_URL is unset."""
+    if not report or not SLACK_CVE_WEBHOOK_URL:
+        return
+    report_id = report.get("_id")
+    title = sanitize_input(report.get("title", "No Title"))
+    team = sanitize_input(report.get("team", {}).get("handle", "N/A"))
+    raw_url = report.get("url")
+    url = raw_url if raw_url and raw_url.startswith("http") else f"https://hackerone.com{raw_url}"
+    sev_obj = report.get("severity")
+    severity = sev_obj.get("rating").capitalize() if sev_obj and sev_obj.get("rating") else "N/A"
+    text = (f":mag: *New H1 disclosure:* <{url}|{title}>\n"
+            f"*Program:* {team}   |   *Severity:* {severity}   |   *Report:* #{report_id}")
+    try:
+        res = requests.post(SLACK_CVE_WEBHOOK_URL, json={"text": text}, timeout=10)
+        res.raise_for_status()
+        print(f"[+] Successfully sent report #{report_id} to Slack.")
+    except requests.exceptions.RequestException:
+        print(f"[!] A network error occurred while sending report #{report_id} to Slack.")
+
 def get_last_id():
     """
     Reads the last processed report ID from our state file.
@@ -226,6 +247,7 @@ def run_monitor(run_once=False):
                     # so the notifications appear in chronological order in Discord.
                     for report in reversed(new_reports):
                         send_to_discord(report)
+                        send_to_slack(report)
                     
                     # After sending all notifications, update the state file to the ID
                     # of the absolute newest report we just handled.
