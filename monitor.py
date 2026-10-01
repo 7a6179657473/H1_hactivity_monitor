@@ -115,6 +115,8 @@ def send_to_discord(report):
     Args:
         report (dict): A dictionary containing the details of a single vulnerability report.
     """
+    if not DISCORD_WEBHOOK_URL or DISCORD_WEBHOOK_URL == "YOUR_DISCORD_WEBHOOK_URL_HERE":
+        return  # Discord disabled (webhook unset/placeholder) -- shifted to Slack-only 2026-10-01
     if not report:
         return
 
@@ -273,10 +275,10 @@ def run_monitor(run_once=False):
 # (e.g., `python monitor.py`), not when it's imported into another script.
 if __name__ == "__main__":
     # Add a check to ensure the Discord Webhook URL is set and not the placeholder.
-    if not DISCORD_WEBHOOK_URL or DISCORD_WEBHOOK_URL == "YOUR_DISCORD_WEBHOOK_URL_HERE":
-        print("[!] FATAL: The DISCORD_WEBHOOK_URL environment variable is not set or is still the default placeholder.")
-        print("[!] Please set it to your Discord webhook URL.")
-        print("[!] Example: export DISCORD_WEBHOOK_URL='https://discord.com/api/webhooks/...'")
+    _discord_ok = DISCORD_WEBHOOK_URL and DISCORD_WEBHOOK_URL != "YOUR_DISCORD_WEBHOOK_URL_HERE"
+    if not _discord_ok and not SLACK_CVE_WEBHOOK_URL:
+        print("[!] FATAL: No notification sink configured.")
+        print("[!] Set SLACK_CVE_WEBHOOK_URL (primary) and/or DISCORD_WEBHOOK_URL (optional mirror).")
         sys.exit(1) # Exit with a non-zero status code to indicate an error.
 
     # Set up the argument parser to handle command-line options.
